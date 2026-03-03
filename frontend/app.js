@@ -747,32 +747,18 @@ async function generateAudio() {
         let targetEndpoint = backendUrl;
         let isRunPod = backendUrl.includes('runpod.ai');
 
-        let response;
-
-        // If it's RunPod, use our Vercel Serverless proxy to strip Brotli compression
+        // If it's RunPod, force it to use async `/run` instead of `/runsync` to avoid 90s timeout
         if (isRunPod) {
             targetEndpoint = targetEndpoint.replace('/runsync', '/run');
-
-            response = await fetch('/api/runpod', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    endpointUrl: targetEndpoint,
-                    apiKey: apiToken,
-                    input: payload
-                })
-            });
-        } else {
-            // Local backend logic
-            if (!targetEndpoint.includes('runsync')) {
-                targetEndpoint = `${backendUrl}/generate_audio`;
-            }
-            response = await fetch(targetEndpoint, {
-                method: 'POST',
-                headers: fetchHeaders,
-                body: JSON.stringify(runpodPayload)
-            });
+        } else if (!targetEndpoint.includes('runsync')) {
+            targetEndpoint = `${backendUrl}/generate_audio`;
         }
+
+        let response = await fetch(targetEndpoint, {
+            method: 'POST',
+            headers: fetchHeaders,
+            body: JSON.stringify(runpodPayload)
+        });
 
         let data = await response.json();
         let resultData = data;
@@ -788,19 +774,9 @@ async function generateAudio() {
             while (true) {
                 await new Promise(resolve => setTimeout(resolve, 3000));
 
-                let statusRes = await fetch('/api/runpod', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        endpointUrl: statusUrl,
-                        apiKey: apiToken,
-                        // Not sending 'input' because status check is a GET request under the hood, 
-                        // but the proxy uses POST to receive our credentials. Wait, the proxy converts it to a POST.
-                        // We must update the proxy to handle non-POST forwarding or just make the proxy do GET if input is missing.
-                        // Actually, RunPod Status endpoints accept GET or POST if auth is in header.
-                        // Let's pass empty input to satisfy the proxy requirement.
-                        input: {}
-                    })
+                let statusRes = await fetch(statusUrl, {
+                    method: 'GET',
+                    headers: fetchHeaders
                 });
 
                 let statusData = await statusRes.json();
