@@ -697,9 +697,22 @@ async function generateAudio() {
     };
 
     if (currentMode === 'custom_voice') {
-        payload.speaker = speakerSelect.value;
-        const inst = document.getElementById('cv-instruct').value.trim();
-        if (inst) payload.instruct = inst;
+        if (speakerSelect.value === 'Voz cristiana') {
+            // Under the hood, this is a voice clone request
+            payload.mode = 'voice_clone';
+            payload.quality = 'quality'; // User specifically requested highest quality
+
+            const voiceData = PREDEFINED_VOICES['Voz cristiana'];
+            payload.ref_audio_base64 = voiceData.base64;
+            payload.ref_text = voiceData.ref_text;
+
+            const inst = document.getElementById('cv-instruct').value.trim();
+            if (inst) payload.instruct = inst;
+        } else {
+            payload.speaker = speakerSelect.value;
+            const inst = document.getElementById('cv-instruct').value.trim();
+            if (inst) payload.instruct = inst;
+        }
     }
     else if (currentMode === 'voice_clone') {
         if (!base64ReferenceAudio) {
