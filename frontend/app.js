@@ -803,7 +803,7 @@ async function generateAudio() {
 
         if ((response.ok || data.status === 'COMPLETED' || resultData.success) && resultData.success !== false && resultData.audio_base64) {
             // ─── DEDUCT TOKENS ───
-            await deductTokens(text.length, currentMode, qualitySelect.value);
+            deductTokens(text.length, currentMode, qualitySelect.value);
             showSuccess(resultData.audio_base64, resultData.duration_seconds, resultData.model_used);
         } else {
             showError(resultData.detail || resultData.error || resultData.message || "Error desconocido devuelto por el servidor.");
