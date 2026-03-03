@@ -1,0 +1,22 @@
+# Qwen3-TTS Voice Cloning Backend — Dependencies
+
+# Web framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+python-multipart>=0.0.18
+
+# Qwen3-TTS model
+qwen-tts>=0.2.0
+
+# PyTorch (CUDA) — install separately via: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# torch>=2.5.0
+
+# Audio processing
+soundfile>=0.13.0
+numpy>=1.26.0
+
+# Data validation
+pydantic>=2.10.0
+
+# Optional: FlashAttention 2 for reduced VRAM usage (install separately)
+# pip install flash-attn --no-build-isolation

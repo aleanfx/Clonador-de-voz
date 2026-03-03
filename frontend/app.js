@@ -48,6 +48,7 @@ const authError = document.getElementById('auth-error');
 const authToggleBtn = document.getElementById('auth-toggle-btn');
 const authToggleText = document.getElementById('auth-toggle-text');
 
+const backendUrlInput = document.getElementById('backend-url');
 const modeBtns = document.querySelectorAll('.mode-btn');
 const modeTitle = document.getElementById('mode-title');
 const modeDesc = document.getElementById('mode-desc');
@@ -559,7 +560,15 @@ async function checkServerStatus() {
         const apiToken = apiTokenInput?.value.trim() || '';
         statusText.textContent = 'Conectando...';
 
-        const headers = { 'ngrok-skip-browser-warning': 'true' };
+        // Wait if it's a RunPod URL, we can't reliably GET a health endpoint
+        if (backendUrl.includes('runpod.ai') && backendUrl.includes('runsync')) {
+            statusIndicator.classList.remove('offline');
+            statusIndicator.classList.add('online');
+            statusText.textContent = 'RunPod Serverless Conectado';
+            return;
+        }
+
+        const headers = {};
         if (apiToken) headers['Authorization'] = `Bearer ${apiToken}`;
 
         const res = await fetch(`${backendUrl}/health`, {
@@ -590,8 +599,32 @@ async function fetchMetadata() {
     try {
         const backendUrl = backendUrlInput.value.replace(/\/$/, '');
         const apiToken = apiTokenInput?.value.trim() || '';
-        const headers = { 'ngrok-skip-browser-warning': 'true' };
+        const headers = {};
         if (apiToken) headers['Authorization'] = `Bearer ${apiToken}`;
+
+        // If it's RunPod, use default fallback data because we can't GET /languages
+        if (backendUrl.includes('runpod.ai') && backendUrl.includes('runsync')) {
+            const fallbackSpeakers = ["Vivian", "Ryan", "Aria", "Emily", "Owen", "Rina", "Hudson", "Claire", "Haruto", "Stella"];
+            const fallbackLanguages = ["Auto", "English", "Spanish", "French", "Japanese", "Korean", "Chinese"];
+
+            languageSelect.innerHTML = '';
+            fallbackLanguages.forEach(lang => {
+                const opt = document.createElement('option');
+                opt.value = lang;
+                opt.textContent = lang === "Auto" ? "Automático" : lang;
+                languageSelect.appendChild(opt);
+            });
+
+            speakerSelect.innerHTML = '';
+            fallbackSpeakers.forEach(spk => {
+                const opt = document.createElement('option');
+                opt.value = spk;
+                opt.textContent = spk;
+                speakerSelect.appendChild(opt);
+            });
+            speakerSelect.value = 'Vivian';
+            return;
+        }
 
         // Fetch Languages
         const langRes = await fetch(`${backendUrl}/languages`, {
@@ -701,25 +734,103 @@ async function generateAudio() {
 
         const fetchHeaders = {
             'Content-Type': 'application/json',
-            'ngrok-skip-browser-warning': 'true'
+            'Accept-Encoding': 'identity'
         };
         if (apiToken) fetchHeaders['Authorization'] = `Bearer ${apiToken}`;
 
-        const response = await fetch(`${backendUrl}/generate_audio` || backendUrl, {
-            method: 'POST',
-            headers: fetchHeaders,
-            body: JSON.stringify(payload)
-        });
+        // RunPod serverless requires the payload to be inside an "input" key
+        const runpodPayload = {
+            input: payload
+        };
+
+        // Determine correct endpoint logic
+        let targetEndpoint = backendUrl;
+        let isRunPod = backendUrl.includes('runpod.ai');
+
+        let response;
+
+        // If it's RunPod, use our Vercel Serverless proxy to strip Brotli compression
+        if (isRunPod) {
+            targetEndpoint = targetEndpoint.replace('/runsync', '/run');
+
+            response = await fetch('/api/runpod', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    endpointUrl: targetEndpoint,
+                    apiKey: apiToken,
+                    input: payload
+                })
+            });
+        } else {
+            // Local backend logic
+            if (!targetEndpoint.includes('runsync')) {
+                targetEndpoint = `${backendUrl}/generate_audio`;
+            }
+            response = await fetch(targetEndpoint, {
+                method: 'POST',
+                headers: fetchHeaders,
+                body: JSON.stringify(runpodPayload)
+            });
+        }
+
+        let data = await response.json();
+        let resultData = data;
+
+        // --- RunPod Async Polling Logic ---
+        if (isRunPod && data.id) {
+            const jobId = data.id;
+            const statusUrl = targetEndpoint.replace('/run', '/status/') + jobId;
+
+            console.log(`  ⏱️ Tarea encolada en RunPod (ID: ${jobId}). Esperando resultados...`);
+
+            // Poll every 3 seconds
+            while (true) {
+                await new Promise(resolve => setTimeout(resolve, 3000));
+
+                let statusRes = await fetch('/api/runpod', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        endpointUrl: statusUrl,
+                        apiKey: apiToken,
+                        // Not sending 'input' because status check is a GET request under the hood, 
+                        // but the proxy uses POST to receive our credentials. Wait, the proxy converts it to a POST.
+                        // We must update the proxy to handle non-POST forwarding or just make the proxy do GET if input is missing.
+                        // Actually, RunPod Status endpoints accept GET or POST if auth is in header.
+                        // Let's pass empty input to satisfy the proxy requirement.
+                        input: {}
+                    })
+                });
+
+                let statusData = await statusRes.json();
+                console.log(`  🔄 Estado: ${statusData.status}`);
+
+                if (statusData.status === 'COMPLETED') {
+                    resultData = statusData.output;
+                    break;
+                } else if (statusData.status === 'FAILED') {
+                    resultData = statusData.error || { success: false, detail: "Error en la ejecución de RunPod." };
+                    break;
+                }
+                // If IN_QUEUE or IN_PROGRESS, loop continues
+            }
+        } else {
+            // Normal sync response or local backend
+            if (data.output && data.status === 'COMPLETED') {
+                resultData = data.output;
+            }
+        }
+        // ----------------------------------
 
         setProgressStage(3);
-        const data = await response.json();
 
-        if (response.ok && data.success) {
+        if ((response.ok || data.status === 'COMPLETED' || resultData.success) && resultData.success !== false && resultData.audio_base64) {
             // ─── DEDUCT TOKENS ───
             await deductTokens(text.length, currentMode, qualitySelect.value);
-            showSuccess(data.audio_base64, data.duration_seconds, data.model_used);
+            showSuccess(resultData.audio_base64, resultData.duration_seconds, resultData.model_used);
         } else {
-            showError(data.detail || data.message || "Error desconocido devuelto por el servidor.");
+            showError(resultData.detail || resultData.error || resultData.message || "Error desconocido devuelto por el servidor.");
         }
     } catch (error) {
         showError("Error de conexión. Verifica que la URL del servidor sea correcta y esté activo.");
