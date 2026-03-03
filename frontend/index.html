@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qwen3-TTS | Voice Cloning Platform</title>
+    <meta name="description" content="Professional AI voice cloning and text-to-speech platform powered by Qwen3-TTS.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+    <!-- Supabase JS SDK (UMD Build) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+
+<body>
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- AUTH SCREEN (shown when not logged in) -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="auth-screen" class="auth-screen">
+        <div class="auth-card panel-glass">
+            <div class="auth-logo">
+                <i class="fa-solid fa-microphone-lines"></i>
+                <h1>Qwen3-TTS</h1>
+                <p>Plataforma de Clonación de Voz con IA</p>
+            </div>
+
+            <div id="auth-error" class="auth-error hidden"></div>
+
+            <!-- Login Form -->
+            <form id="login-form" class="auth-form">
+                <div class="form-group">
+                    <label for="login-email">Correo Electrónico</label>
+                    <input type="email" id="login-email" class="modern-input" placeholder="tu@email.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Contraseña</label>
+                    <input type="password" id="login-password" class="modern-input" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="primary-btn auth-btn">
+                    <i class="fa-solid fa-right-to-bracket"></i> Iniciar Sesión
+                </button>
+            </form>
+
+            <!-- Register Form (hidden by default) -->
+            <form id="register-form" class="auth-form hidden">
+                <div class="form-group">
+                    <label for="register-email">Correo Electrónico</label>
+                    <input type="email" id="register-email" class="modern-input" placeholder="tu@email.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="register-password">Contraseña</label>
+                    <input type="password" id="register-password" class="modern-input" placeholder="Mínimo 6 caracteres"
+                        minlength="6" required>
+                </div>
+                <div class="form-group">
+                    <label for="register-password-confirm">Confirmar Contraseña</label>
+                    <input type="password" id="register-password-confirm" class="modern-input"
+                        placeholder="Repite tu contraseña" minlength="6" required>
+                </div>
+                <button type="submit" class="primary-btn auth-btn">
+                    <i class="fa-solid fa-user-plus"></i> Crear Cuenta
+                </button>
+            </form>
+
+            <div class="auth-toggle">
+                <span id="auth-toggle-text">¿No tienes cuenta?</span>
+                <button id="auth-toggle-btn" type="button" class="link-btn">Regístrate aquí</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- MAIN APP (hidden until logged in) -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="app-container" class="app-container hidden">
+        <!-- Sidebar / Navigation -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fa-solid fa-microphone-lines"></i>
+                <h2>Qwen3-TTS</h2>
+            </div>
+
+            <nav class="modes-nav">
+                <button class="mode-btn active" data-mode="custom_voice">
+                    <i class="fa-solid fa-user-tie"></i>
+                    Voz Personalizada
+                </button>
+                <button class="mode-btn" data-mode="voice_clone">
+                    <i class="fa-solid fa-clone"></i>
+                    Clonar Voz
+                </button>
+                <button class="mode-btn" data-mode="voice_design">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    Diseñar Voz
+                </button>
+            </nav>
+
+            <!-- Token Balance -->
+            <div class="token-balance-card panel-glass">
+                <div class="token-header">
+                    <i class="fa-solid fa-coins"></i>
+                    <span>Mis Tokens</span>
+                </div>
+                <div class="token-amount" id="token-balance">0</div>
+                <div class="token-label">caracteres disponibles</div>
+                <button id="buy-tokens-btn" class="buy-tokens-btn">
+                    <i class="fa-solid fa-cart-plus"></i> Recargar Tokens
+                </button>
+            </div>
+
+            <div class="settings-panel panel-glass">
+                <h3><i class="fa-solid fa-sliders"></i> Configuración</h3>
+
+                <div class="form-group">
+                    <label for="backend-url">URL del Backend (API)</label>
+                    <input type="text" id="backend-url" class="modern-input" value="http://localhost:8000"
+                        placeholder="Ej: https://tu-url-de-colab.loca.lt">
+                    <small style="color: var(--text-muted); font-size: 0.75rem;">Usa localhost para local o pega el link
+                        de Colab/RunPod.</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="api-token">Token de Autorización (Clave RunPod)</label>
+                    <input type="password" id="api-token" class="modern-input" value=""
+                        placeholder="Pega tu API Key de RunPod aquí">
+                </div>
+
+                <div class="form-group">
+                    <label for="quality-select">Calidad (Modelo)</label>
+                    <select id="quality-select" class="modern-select">
+                        <option value="fast" selected>Fast (0.6B) - Rápido</option>
+                        <option value="quality">Quality (1.7B) - Premium</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="language-select">Idioma de Salida</label>
+                    <select id="language-select" class="modern-select">
+                        <option value="Auto">Automático</option>
+                        <!-- Populated by JS -->
+                    </select>
+                </div>
+            </div>
+
+            <div class="server-status">
+                <div class="status-indicator"></div>
+                <span id="server-status-text">Conectando...</span>
+            </div>
+
+            <!-- User Menu -->
+            <div class="user-menu">
+                <div class="user-info">
+                    <i class="fa-solid fa-user-circle"></i>
+                    <span id="user-email" class="user-email">user@email.com</span>
+                </div>
+                <div class="user-actions">
+                    <button id="admin-panel-btn" class="icon-btn hidden" title="Panel Admin">
+                        <i class="fa-solid fa-shield-halved"></i>
+                    </button>
+                    <button id="my-payments-btn" class="icon-btn" title="Mis Pagos">
+                        <i class="fa-solid fa-receipt"></i>
+                    </button>
+                    <button id="logout-btn" class="icon-btn" title="Cerrar Sesión">
+                        <i class="fa-solid fa-right-from-bracket"></i>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <header class="top-header">
+                <h1 id="mode-title">Voz Personalizada</h1>
+                <p id="mode-desc">Sintetiza texto usando voces predefinidas de alta calidad.</p>
+            </header>
+
+            <div class="workspace">
+                <!-- Dynamic Input Area (Changes based on mode) -->
+                <div class="dynamic-inputs panel-glass">
+
+                    <!-- Custom Voice Inputs -->
+                    <div id="custom-voice-inputs" class="mode-section active">
+                        <div class="form-row">
+                            <div class="form-group half">
+                                <label for="speaker-select">Voz (Speaker)</label>
+                                <select id="speaker-select" class="modern-select">
+                                    <option value="Vivian">Vivian (Mujer, Chino)</option>
+                                    <option value="Ryan">Ryan (Hombre, Inglés)</option>
+                                    <option value="Aria">Aria (Mujer, Inglés)</option>
+                                    <option value="Emily">Emily (Mujer, Inglés)</option>
+                                    <option value="Owen">Owen (Hombre, Inglés)</option>
+                                    <option value="Rina">Rina (Mujer, Japonés)</option>
+                                    <option value="Hudson">Hudson (Hombre, Inglés)</option>
+                                    <option value="Claire">Claire (Mujer, Francés)</option>
+                                    <option value="Haruto">Haruto (Hombre, Japonés)</option>
+                                    <option value="Stella">Stella (Mujer, Inglés)</option>
+                                </select>
+                            </div>
+                            <div class="form-group half">
+                                <label for="cv-instruct">Instrucciones de Estilo (Opcional)</label>
+                                <input type="text" id="cv-instruct" class="modern-input"
+                                    placeholder="En inglés. Ej: Speak with a very happy and excited tone.">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Voice Clone Inputs -->
+                    <div id="voice-clone-inputs" class="mode-section">
+                        <div class="form-row">
+                            <div class="form-group file-upload-group half">
+                                <label>Audio de Referencia</label>
+                                <div class="file-drop-area" id="audio-drop-area">
+                                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                                    <p>Arrastra un archivo o <span>haz clic para buscar</span></p>
+                                    <input type="file" id="ref-audio-upload" accept="audio/*">
+                                    <div id="file-name-display" class="file-name hidden"></div>
+                                </div>
+                            </div>
+                            <div class="form-group half">
+                                <label for="ref-text">Transcripción del Audio (Recomendado)</label>
+                                <textarea id="ref-text" class="modern-textarea small"
+                                    placeholder="Escribe lo que se dice en el audio de referencia exacto..."></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Voice Design Inputs -->
+                    <div id="voice-design-inputs" class="mode-section">
+                        <div class="form-alert warning">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            El diseño de voz requiere el modelo Quality (1.7B). Las instrucciones funcionan mejor
+                            <strong>en inglés</strong>.
+                        </div>
+                        <div class="form-group">
+                            <label for="vd-instruct">Descripción de la Voz (Prompt)</label>
+                            <div class="vd-examples-bar">
+                                <span class="vd-examples-label">Ejemplos rápidos:</span>
+                                <button type="button" class="vd-example-btn"
+                                    data-instruct="Male, 35 years old, deep baritone voice, angry tone, speaking slowly with controlled intensity and dramatic pauses.">🗣️
+                                    Hombre enojado</button>
+                                <button type="button" class="vd-example-btn"
+                                    data-instruct="Female, 28 years old, warm and soothing mezzo-soprano voice, calm and gentle tone, speaking at a moderate pace with soft intonation.">👩
+                                    Mujer calmada</button>
+                                <button type="button" class="vd-example-btn"
+                                    data-instruct="Male, 60 years old, mature gravelly voice with wisdom, narrating slowly and deliberately like a storyteller, deep pitch with slight rasp.">👴
+                                    Narrador mayor</button>
+                                <button type="button" class="vd-example-btn"
+                                    data-instruct="Female, 22 years old, bright and energetic high-pitched voice, excited and enthusiastic tone, speaking quickly with rising intonation.">🎀
+                                    Joven animada</button>
+                                <button type="button" class="vd-example-btn"
+                                    data-instruct="Male, 45 years old, authoritative and confident bass voice, professional news anchor style, clear articulation, measured pace.">📺
+                                    Presentador</button>
+                            </div>
+                            <textarea id="vd-instruct" class="modern-textarea small"
+                                placeholder="Describe la voz EN INGLÉS para mejores resultados. Ejemplo:&#10;Male, 30 years old, deep voice, angry tone, speaking slowly with intensity.&#10;&#10;Incluye: género, edad, tipo de voz, emoción, velocidad, estilo."></textarea>
+                            <small class="vd-hint">💡 <strong>Tip:</strong> Usa inglés y sé detallado — incluye género,
+                                edad, tono de voz, emoción y velocidad para resultados más precisos. Puedes hacer clic
+                                en los ejemplos de arriba.</small>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Main Text Input -->
+                <div class="text-input-area panel-glass">
+                    <label for="main-text">Guion a Sintetizar</label>
+                    <textarea id="main-text" class="modern-textarea large"
+                        placeholder="Escribe aquí el texto que deseas convertir en voz..."></textarea>
+
+                    <div class="action-bar">
+                        <span class="char-count"><span id="char-current">0</span> / 5000</span>
+                        <button id="generate-btn" class="primary-btn">
+                            <i class="fa-solid fa-wand-magic"></i> Generar Audio
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Result Area -->
+                <div class="result-area panel-glass hidden" id="result-panel">
+                    <h3><i class="fa-solid fa-headphones"></i> Resultado Generado</h3>
+
+                    <div id="loading-state" class="loading-container hidden">
+                        <div class="progress-tracker">
+                            <div class="progress-stages">
+                                <div class="stage active" id="stage-send"><i class="fa-solid fa-paper-plane"></i>
+                                    Enviando</div>
+                                <div class="stage" id="stage-model"><i class="fa-solid fa-brain"></i> Cargando modelo
+                                </div>
+                                <div class="stage" id="stage-generate"><i
+                                        class="fa-solid fa-waveform fa-solid fa-music"></i> Generando audio</div>
+                                <div class="stage" id="stage-encode"><i class="fa-solid fa-download"></i> Recibiendo
+                                </div>
+                            </div>
+                            <div class="progress-bar-container">
+                                <div class="progress-bar-fill" id="progress-fill"></div>
+                            </div>
+                            <div class="progress-info">
+                                <span id="progress-elapsed"><i class="fa-regular fa-clock"></i> 0s transcurridos</span>
+                                <span id="progress-estimate"><i class="fa-solid fa-hourglass-half"></i>
+                                    Estimando...</span>
+                            </div>
+                            <p class="progress-detail" id="progress-detail">Preparando solicitud...</p>
+                        </div>
+                    </div>
+
+                    <div id="success-state" class="success-container hidden">
+                        <div class="audio-player-wrapper">
+                            <audio id="result-audio" controls></audio>
+                        </div>
+                        <div class="result-meta">
+                            <span class="badge" id="meta-duration"><i class="fa-regular fa-clock"></i> 0.0s</span>
+                            <span class="badge" id="meta-model"><i class="fa-solid fa-microchip"></i> Model</span>
+                        </div>
+                        <a id="download-btn" class="secondary-btn" download="generado_qwen.wav">
+                            <i class="fa-solid fa-download"></i> Descargar WAV
+                        </a>
+                    </div>
+
+                    <div id="error-state" class="error-container hidden">
+                        <div class="error-icon"><i class="fa-solid fa-circle-exclamation"></i></div>
+                        <p id="error-message">Ocurrió un error al generar el audio.</p>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- PAYMENT MODAL -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="payment-modal" class="modal-overlay hidden">
+        <div class="modal-card panel-glass">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-coins"></i> Recargar Tokens</h2>
+                <button id="close-payment-modal" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="pricing-card">
+                    <div class="pricing-amount">50 USDT</div>
+                    <div class="pricing-tokens">= 2,400,000 caracteres</div>
+                    <div class="pricing-detail">Genera miles de audios con IA de alta calidad</div>
+                </div>
+
+                <div class="payment-methods">
+                    <h3>Métodos de Pago</h3>
+
+                    <div class="payment-method-card">
+                        <div class="pm-header">
+                            <i class="fa-brands fa-bitcoin"></i>
+                            <strong>USDT (BEP20 - Binance Smart Chain)</strong>
+                        </div>
+                        <div class="pm-address">
+                            <code id="usdt-address">0x233b61263eb0d5faa859e7d4d5591da87929c003</code>
+                            <button class="copy-btn" data-copy="0x233b61263eb0d5faa859e7d4d5591da87929c003"
+                                title="Copiar">
+                                <i class="fa-solid fa-copy"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="payment-method-card">
+                        <div class="pm-header">
+                            <i class="fa-solid fa-building-columns"></i>
+                            <strong>Binance ID (Transferencia Interna)</strong>
+                        </div>
+                        <div class="pm-address">
+                            <code id="binance-id">354902745</code>
+                            <button class="copy-btn" data-copy="354902745" title="Copiar">
+                                <i class="fa-solid fa-copy"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="proof-upload-section">
+                    <h3>Adjuntar Comprobante de Pago</h3>
+                    <p class="proof-hint">Después de realizar la transferencia, sube una captura de pantalla del
+                        comprobante.</p>
+
+                    <div class="form-group">
+                        <label>Método utilizado</label>
+                        <select id="payment-method-select" class="modern-select">
+                            <option value="usdt_bep20">USDT BEP20</option>
+                            <option value="binance_id">Binance ID</option>
+                        </select>
+                    </div>
+
+                    <div class="file-drop-area" id="proof-drop-area">
+                        <i class="fa-solid fa-cloud-arrow-up"></i>
+                        <p>Arrastra la captura o <span>haz clic para buscar</span></p>
+                        <input type="file" id="proof-upload" accept="image/*">
+                        <div id="proof-file-name" class="file-name hidden"></div>
+                    </div>
+
+                    <button id="submit-payment-btn" class="primary-btn auth-btn" disabled>
+                        <i class="fa-solid fa-paper-plane"></i> Enviar Comprobante
+                    </button>
+                    <div id="payment-submit-status" class="hidden"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- MY PAYMENTS MODAL -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="my-payments-modal" class="modal-overlay hidden">
+        <div class="modal-card panel-glass modal-wide">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-receipt"></i> Mis Pagos</h2>
+                <button id="close-my-payments-modal" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div id="my-payments-list" class="payments-list">
+                    <p class="empty-state">Cargando...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- ADMIN PANEL MODAL -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="admin-modal" class="modal-overlay hidden">
+        <div class="modal-card panel-glass modal-wide">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-shield-halved"></i> Panel de Administración</h2>
+                <button id="close-admin-modal" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="admin-tabs">
+                    <button class="admin-tab active" data-tab="pending">Pagos Pendientes</button>
+                    <button class="admin-tab" data-tab="history">Historial</button>
+                </div>
+                <div id="admin-payments-list" class="payments-list">
+                    <p class="empty-state">Cargando...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>
