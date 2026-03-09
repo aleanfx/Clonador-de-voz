@@ -1018,6 +1018,8 @@ async function generateAudio() {
         quality: qualitySelect.value
     };
 
+    console.log(`%c[Qwen3-TTS] 🚀 Iniciando generación en modo: ${detectedMode}`, 'color: #e91e63; font-weight: bold;');
+
     if (detectedMode === 'custom_voice') {
         const selectedSpeaker = speakerSelect.value;
         if (selectedSpeaker === 'Voz cristiana') {
