@@ -1008,17 +1008,24 @@ async function generateAudio() {
     }
 
     // Build base payload
-    // FORCE mode detection from UI to avoid sync issues
-    const activeBtn = document.querySelector('.mode-btn.active');
-    const detectedMode = activeBtn ? activeBtn.getAttribute('data-mode') : currentMode;
+    // DETECCIÓN ROBUSTA: Comprobamos qué sección de inputs está visible en el DOM
+    let detectedMode = 'custom_voice';
+    const cloneSection = document.getElementById('voice-clone-inputs');
+    const designSection = document.getElementById('voice-design-inputs');
+
+    if (cloneSection && cloneSection.classList.contains('active')) {
+        detectedMode = 'voice_clone';
+    } else if (designSection && designSection.classList.contains('active')) {
+        detectedMode = 'voice_design';
+    }
+
+    console.log(`%c[Qwen3-TTS] 🚀 MODO DETECTADO: ${detectedMode.toUpperCase()}`, 'background: #e91e63; color: white; padding: 2px 5px; border-radius: 3px;');
 
     const basePayload = {
         language: languageSelect.value,
         mode: detectedMode,
         quality: qualitySelect.value
     };
-
-    console.log(`%c[Qwen3-TTS] 🚀 Iniciando generación en modo: ${detectedMode}`, 'color: #e91e63; font-weight: bold;');
 
     if (detectedMode === 'custom_voice') {
         const selectedSpeaker = speakerSelect.value;
@@ -1027,25 +1034,27 @@ async function generateAudio() {
             const voiceData = PREDEFINED_VOICES['Voz cristiana'];
             basePayload.ref_audio_base64 = voiceData.base64;
             basePayload.ref_text = voiceData.ref_text;
+            console.log("[Qwen3-TTS] 🪄 Usando preset 'Voz cristiana' (Clonación interna)");
         } else {
             basePayload.speaker = selectedSpeaker;
         }
-        const inst = document.getElementById('cv-instruct')?.value.trim();
-        if (inst) basePayload.instruct = inst;
     }
     else if (detectedMode === 'voice_clone') {
         if (!base64ReferenceAudio) {
-            alert("Debes subir un archivo de audio de referencia para clonar la voz.");
+            alert("⚠️ Error: Debes subir un audio de referencia primero.");
+            hideLoading();
             return;
         }
         basePayload.ref_audio_base64 = base64ReferenceAudio;
         const refTx = document.getElementById('ref-text')?.value.trim();
         if (refTx) basePayload.ref_text = refTx;
+        console.log("[Qwen3-TTS] 👤 Enviando audio de referencia para clonación");
     }
     else if (detectedMode === 'voice_design') {
         const inst = document.getElementById('vd-instruct')?.value.trim();
         if (!inst) {
-            alert("Debes ingresar una descripción de la voz para diseñarla.");
+            alert("⚠️ Error: Describe la voz que quieres diseñar.");
+            hideLoading();
             return;
         }
         basePayload.instruct = inst;
