@@ -577,7 +577,13 @@ function showError(msg) {
 
 async function checkServerStatus() {
     try {
-        const backendUrl = backendUrlInput.value.replace(/\/$/, '');
+        let backendUrl = backendUrlInput.value.trim().replace(/\/$/, '');
+
+        // Sanitize: strip common endpoint suffixes if user pasted the full link
+        backendUrl = backendUrl.replace(/\/health$/, '')
+            .replace(/\/generate$/, '')
+            .replace(/\/generate_audio$/, '');
+
         const apiToken = apiTokenInput?.value.trim() || '';
         statusText.textContent = 'Conectando...';
 
@@ -618,7 +624,13 @@ async function checkServerStatus() {
 
 async function fetchMetadata() {
     try {
-        const backendUrl = backendUrlInput.value.replace(/\/$/, '');
+        let backendUrl = backendUrlInput.value.trim().replace(/\/$/, '');
+
+        // Sanitize
+        backendUrl = backendUrl.replace(/\/health$/, '')
+            .replace(/\/generate$/, '')
+            .replace(/\/generate_audio$/, '');
+
         const apiToken = apiTokenInput?.value.trim() || '';
         const headers = {};
         if (apiToken) headers['Authorization'] = `Bearer ${apiToken}`;
@@ -1038,9 +1050,15 @@ async function generateAudio() {
     }
 
     showLoading();
-    startProgressTimer(text.length);
+    if (!text) return;
 
-    const backendUrl = backendUrlInput.value.replace(/\/$/, '');
+    let backendUrl = backendUrlInput.value.trim().replace(/\/$/, '');
+
+    // Sanitize
+    backendUrl = backendUrl.replace(/\/health$/, '')
+        .replace(/\/generate$/, '')
+        .replace(/\/generate_audio$/, '');
+
     let apiToken = apiTokenInput?.value.trim() || '';
     if (!apiToken) {
         apiToken = atob("cnBhX1EzNUtBUjZZQUw5UFlGTEk=") + atob("OURUSDNIUllUVUJUSkxUVE1HRjlXRkZ4MW1nNmo4");
