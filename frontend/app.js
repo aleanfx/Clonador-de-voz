@@ -1007,12 +1007,18 @@ async function generateAudio() {
         return;
     }
 
-    // Build base payload
-    // --- DETECCIÓN DEFINITIVA DE MODO ---
-    const activeBtn = document.querySelector('.mode-btn.active');
-    let detectedMode = activeBtn ? activeBtn.getAttribute('data-mode') : currentMode;
+    // --- DETECCIÓN DE MODO MEJORADA (V5) ---
+    const btnClonar = document.querySelector('.mode-btn[data-mode="voice_clone"]');
+    const isCloningTab = btnClonar && btnClonar.classList.contains('active');
 
-    console.log(`%c[Qwen3-TTS V4.0] 🚀 MODO: ${detectedMode.toUpperCase()} | Audio: ${base64ReferenceAudio ? 'SI' : 'NO'}`, 'background: #000; color: #0f0; padding: 4px; border: 1px solid #0f0;');
+    let detectedMode = isCloningTab ? 'voice_clone' : 'custom_voice';
+
+    // Si hay un audio de referencia pero el modo no es diseño, forzamos clonación
+    if (base64ReferenceAudio && detectedMode !== 'voice_design') {
+        detectedMode = 'voice_clone';
+    }
+
+    console.log(`%c[Qwen3-TTS V5.0] 🚀 MODO: ${detectedMode.toUpperCase()} | RefAudio: ${base64ReferenceAudio ? 'OK' : 'FALTA'}`, 'background: #000; color: #00ff00; font-weight: bold; padding: 5px;');
 
     const basePayload = {
         language: languageSelect.value,
@@ -1020,28 +1026,25 @@ async function generateAudio() {
         quality: qualitySelect.value
     };
 
-    if (detectedMode === 'custom_voice') {
-        const selectedSpeaker = speakerSelect.value;
-        if (selectedSpeaker === 'Voz cristiana') {
-            basePayload.mode = 'voice_clone';
-            const voiceData = PREDEFINED_VOICES['Voz cristiana'];
-            basePayload.ref_audio_base64 = voiceData.base64;
-            basePayload.ref_text = voiceData.ref_text;
-            console.log("[Qwen3-TTS] 🪄 Usando preset 'Voz cristiana' (Clonación interna)");
-        } else {
-            basePayload.speaker = selectedSpeaker;
-        }
-    }
-    else if (detectedMode === 'voice_clone') {
+    if (detectedMode === 'voice_clone') {
         if (!base64ReferenceAudio) {
-            alert("⚠️ Error: Debes subir un audio de referencia primero.");
+            alert("⚠️ Error: Necesitas subir un audio primero para clonar.");
             hideLoading();
             return;
         }
         basePayload.ref_audio_base64 = base64ReferenceAudio;
         const refTx = document.getElementById('ref-text')?.value.trim();
         if (refTx) basePayload.ref_text = refTx;
-        console.log("[Qwen3-TTS] 👤 Enviando audio de referencia para clonación");
+    } else if (detectedMode === 'custom_voice') {
+        const selSpk = speakerSelect.value;
+        if (selSpk === 'Voz cristiana') {
+            basePayload.mode = 'voice_clone';
+            const vData = PREDEFINED_VOICES['Voz cristiana'];
+            basePayload.ref_audio_base64 = vData.base64;
+            basePayload.ref_text = vData.ref_text;
+        } else {
+            basePayload.speaker = selSpk;
+        }
     }
     else if (detectedMode === 'voice_design') {
         const inst = document.getElementById('vd-instruct')?.value.trim();
