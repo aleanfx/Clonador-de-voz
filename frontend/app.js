@@ -1008,18 +1008,11 @@ async function generateAudio() {
     }
 
     // Build base payload
-    // DETECCIÓN ROBUSTA: Comprobamos qué sección de inputs está visible en el DOM
-    let detectedMode = 'custom_voice';
-    const cloneSection = document.getElementById('voice-clone-inputs');
-    const designSection = document.getElementById('voice-design-inputs');
+    // --- DETECCIÓN DEFINITIVA DE MODO ---
+    const activeBtn = document.querySelector('.mode-btn.active');
+    let detectedMode = activeBtn ? activeBtn.getAttribute('data-mode') : currentMode;
 
-    if (cloneSection && cloneSection.classList.contains('active')) {
-        detectedMode = 'voice_clone';
-    } else if (designSection && designSection.classList.contains('active')) {
-        detectedMode = 'voice_design';
-    }
-
-    console.log(`%c[Qwen3-TTS] 🚀 MODO DETECTADO: ${detectedMode.toUpperCase()}`, 'background: #e91e63; color: white; padding: 2px 5px; border-radius: 3px;');
+    console.log(`%c[Qwen3-TTS V4.0] 🚀 MODO: ${detectedMode.toUpperCase()} | Audio: ${base64ReferenceAudio ? 'SI' : 'NO'}`, 'background: #000; color: #0f0; padding: 4px; border: 1px solid #0f0;');
 
     const basePayload = {
         language: languageSelect.value,
