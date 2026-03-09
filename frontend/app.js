@@ -6,7 +6,7 @@
 let currentUser = null;
 let currentProfile = null;
 let currentBalance = 0;
-let currentMode = 'custom_voice';
+let currentMode = 'custom_voice'; // Default
 let base64ReferenceAudio = null;
 let proofFile = null;
 
@@ -1007,41 +1007,41 @@ async function generateAudio() {
         return;
     }
 
-    // Build base payload (without text — text will be set per chunk)
+    // Build base payload
+    // FORCE mode detection from UI to avoid sync issues
+    const activeBtn = document.querySelector('.mode-btn.active');
+    const detectedMode = activeBtn ? activeBtn.getAttribute('data-mode') : currentMode;
+
     const basePayload = {
         language: languageSelect.value,
-        mode: currentMode,
+        mode: detectedMode,
         quality: qualitySelect.value
     };
 
-    if (currentMode === 'custom_voice') {
-        if (speakerSelect.value === 'Voz cristiana') {
+    if (detectedMode === 'custom_voice') {
+        const selectedSpeaker = speakerSelect.value;
+        if (selectedSpeaker === 'Voz cristiana') {
             basePayload.mode = 'voice_clone';
-            basePayload.quality = 'quality';
-
             const voiceData = PREDEFINED_VOICES['Voz cristiana'];
             basePayload.ref_audio_base64 = voiceData.base64;
             basePayload.ref_text = voiceData.ref_text;
-
-            const inst = document.getElementById('cv-instruct').value.trim();
-            if (inst) basePayload.instruct = inst;
         } else {
-            basePayload.speaker = speakerSelect.value;
-            const inst = document.getElementById('cv-instruct').value.trim();
-            if (inst) basePayload.instruct = inst;
+            basePayload.speaker = selectedSpeaker;
         }
+        const inst = document.getElementById('cv-instruct')?.value.trim();
+        if (inst) basePayload.instruct = inst;
     }
-    else if (currentMode === 'voice_clone') {
+    else if (detectedMode === 'voice_clone') {
         if (!base64ReferenceAudio) {
             alert("Debes subir un archivo de audio de referencia para clonar la voz.");
             return;
         }
         basePayload.ref_audio_base64 = base64ReferenceAudio;
-        const refTx = document.getElementById('ref-text').value.trim();
+        const refTx = document.getElementById('ref-text')?.value.trim();
         if (refTx) basePayload.ref_text = refTx;
     }
-    else if (currentMode === 'voice_design') {
-        const inst = document.getElementById('vd-instruct').value.trim();
+    else if (detectedMode === 'voice_design') {
+        const inst = document.getElementById('vd-instruct')?.value.trim();
         if (!inst) {
             alert("Debes ingresar una descripción de la voz para diseñarla.");
             return;
