@@ -308,9 +308,10 @@ function setupTTSListeners() {
     const tokenPart1 = atob("cnBhX1EzNUtBUjZZQUw5UFlGTEk=");
     const tokenPart2 = atob("OURUSDNIUllUVUJUSkxUVE1HRjlXRkZ4MW1nNmo4");
 
-    // Auto-fill RunPod default values if empty
-    if (!backendUrlInput.value || backendUrlInput.value === 'http://localhost:8000') {
-        backendUrlInput.value = "https://api.runpod.ai/v2/tkno24whf28pz0/runsync";
+    // Auto-fill RunPod default values if empty or using old serverless
+    const oldUrl = "https://api.runpod.ai/v2/tkno24whf28pz0/runsync";
+    if (!backendUrlInput.value || backendUrlInput.value === 'http://localhost:8000' || backendUrlInput.value === oldUrl) {
+        backendUrlInput.value = "https://m50sjj8uvufto9-8000.proxy.runpod.net";
     }
     if (!apiTokenInput.value) {
         apiTokenInput.value = tokenPart1 + tokenPart2;
@@ -334,7 +335,7 @@ function setupTTSListeners() {
     mainText.addEventListener('input', () => {
         const len = mainText.value.length;
         charCurrent.textContent = len;
-        if (len > 5000) {
+        if (len > 100000) {
             charCurrent.style.color = 'var(--danger)';
         } else {
             charCurrent.style.color = 'var(--text-secondary)';
@@ -518,7 +519,7 @@ function showLoading() {
     setProgressStage(0);
 }
 
-function showSuccess(audioBase64, duration, modelId) {
+function showSuccess(audioUrl, duration, modelId) {
     stopProgressTimer();
     setProgressStage(3);
     document.getElementById('progress-fill').style.width = '100%';
@@ -533,9 +534,17 @@ function showSuccess(audioBase64, duration, modelId) {
         loadingState.classList.add('hidden');
         successState.classList.remove('hidden');
 
-        const audioUrl = `data:audio/wav;base64,${audioBase64}`;
+        // Note: audioUrl is already a Blob URL
         resultAudio.src = audioUrl;
         downloadBtn.href = audioUrl;
+
+        // Ensure download filename ends in .mp3 rather than .wav
+        if (downloadBtn.hasAttribute('download')) {
+            let currentName = downloadBtn.getAttribute('download');
+            downloadBtn.setAttribute('download', currentName.replace('.wav', '.mp3'));
+        } else {
+            downloadBtn.setAttribute('download', 'sintesis_qwen3.mp3');
+        }
 
         metaDuration.innerHTML = `<i class="fa-regular fa-clock"></i> ${duration}s`;
         metaModel.innerHTML = `<i class="fa-solid fa-microchip"></i> ${modelId.split('/').pop()}`;
@@ -572,7 +581,7 @@ async function checkServerStatus() {
         const apiToken = apiTokenInput?.value.trim() || '';
         statusText.textContent = 'Conectando...';
 
-        // Wait if it's a RunPod URL, we can't reliably GET a health endpoint
+        // Wait if it's a RunPod Serverless URL, we can't reliably GET a health endpoint
         if (backendUrl.includes('runpod.ai') && backendUrl.includes('runsync')) {
             statusIndicator.classList.remove('offline');
             statusIndicator.classList.add('online');
@@ -725,6 +734,248 @@ async function fetchMetadata() {
 // Generate Audio (MODIFIED: + token check & deduction)
 // ──────────────────────────────────────────────
 
+// ─── Text Chunking Utilities ───
+function splitTextIntoChunks(text, maxChunkSize = 1200) {
+    if (text.length <= maxChunkSize) return [text];
+
+    const chunks = [];
+    let remaining = text;
+
+    while (remaining.length > 0) {
+        if (remaining.length <= maxChunkSize) {
+            chunks.push(remaining);
+            break;
+        }
+
+        // Try to split at sentence boundaries (., !, ?, \n) within the max chunk size
+        let splitIndex = -1;
+        const searchArea = remaining.substring(0, maxChunkSize);
+
+        // Look for the last sentence-ending punctuation followed by a space or newline
+        for (let i = searchArea.length - 1; i >= Math.floor(maxChunkSize * 0.5); i--) {
+            const ch = searchArea[i];
+            if ((ch === '.' || ch === '!' || ch === '?' || ch === '\n') &&
+                (i + 1 >= searchArea.length || searchArea[i + 1] === ' ' || searchArea[i + 1] === '\n')) {
+                splitIndex = i + 1;
+                break;
+            }
+        }
+
+        // If no sentence boundary found, split at last space
+        if (splitIndex === -1) {
+            splitIndex = searchArea.lastIndexOf(' ');
+        }
+
+        // If still no good split point, force split at maxChunkSize
+        if (splitIndex === -1 || splitIndex < Math.floor(maxChunkSize * 0.3)) {
+            splitIndex = maxChunkSize;
+        }
+
+        chunks.push(remaining.substring(0, splitIndex).trim());
+        remaining = remaining.substring(splitIndex).trim();
+    }
+
+    return chunks.filter(c => c.length > 0);
+}
+
+function base64ToArrayBuffer(base64) {
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
+function concatenateWavBuffers(wavBuffers) {
+    if (wavBuffers.length === 0) return null;
+    if (wavBuffers.length === 1) return wavBuffers[0];
+
+    // Read WAV header from first buffer to get format info
+    const firstView = new DataView(wavBuffers[0]);
+    const numChannels = firstView.getUint16(22, true);
+    const sampleRate = firstView.getUint32(24, true);
+    const bitsPerSample = firstView.getUint16(34, true);
+
+    // Extract PCM data from each WAV (skip 44-byte header)
+    const pcmChunks = wavBuffers.map(buf => new Uint8Array(buf, 44));
+    const totalPcmLength = pcmChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+
+    // Build new WAV file
+    const wavBuffer = new ArrayBuffer(44 + totalPcmLength);
+    const view = new DataView(wavBuffer);
+
+    // RIFF header
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + totalPcmLength, true);
+    writeString(view, 8, 'WAVE');
+
+    // fmt sub-chunk
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true); // SubChunk1Size (PCM)
+    view.setUint16(20, 1, true);  // AudioFormat (PCM = 1)
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true); // ByteRate
+    view.setUint16(32, numChannels * (bitsPerSample / 8), true); // BlockAlign
+    view.setUint16(34, bitsPerSample, true);
+
+    // data sub-chunk
+    writeString(view, 36, 'data');
+    view.setUint32(40, totalPcmLength, true);
+
+    // Copy PCM data
+    let offset = 44;
+    for (const chunk of pcmChunks) {
+        new Uint8Array(wavBuffer, offset, chunk.length).set(chunk);
+        offset += chunk.length;
+    }
+
+    return wavBuffer;
+}
+
+function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+    }
+}
+
+function arrayBufferToBase64(buffer) {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+        binary += String.fromCharCode.apply(null, chunk);
+    }
+    return btoa(binary);
+}
+
+// ─── WAV to MP3 Conversion ───
+function convertWavToMp3(wavBuffer) {
+    if (!window.lamejs) {
+        console.warn('lamejs no está cargado, devolviendo WAV original');
+        return wavBuffer;
+    }
+
+    const view = new DataView(wavBuffer);
+    const numChannels = view.getUint16(22, true);
+    const sampleRate = view.getUint32(24, true);
+
+    // lame.js only supports 1 or 2 channels, and 16-bit PCM
+    const kbps = 128; // Standard quality
+    const mp3encoder = new lamejs.Mp3Encoder(numChannels, sampleRate, kbps);
+    const mp3Data = [];
+
+    // Extract 16-bit PCM samples
+    const samples = new Int16Array(wavBuffer, 44);
+
+    // For 1 channel, lamejs expects one array. For 2, it expects left and right arrays.
+    // Qwen3-TTS usually outputs mono (1 channel).
+    const sampleBlockSize = 1152;
+    if (numChannels === 1) {
+        for (let i = 0; i < samples.length; i += sampleBlockSize) {
+            const sampleChunk = samples.subarray(i, i + sampleBlockSize);
+            const mp3buf = mp3encoder.encodeBuffer(sampleChunk);
+            if (mp3buf.length > 0) mp3Data.push(mp3buf);
+        }
+    } else {
+        // Stereo handling (interleaved)
+        const left = new Int16Array(samples.length / 2);
+        const right = new Int16Array(samples.length / 2);
+        for (let i = 0; i < samples.length; i += 2) {
+            left[i / 2] = samples[i];
+            right[i / 2] = samples[i + 1];
+        }
+        for (let i = 0; i < left.length; i += sampleBlockSize) {
+            const leftChunk = left.subarray(i, i + sampleBlockSize);
+            const rightChunk = right.subarray(i, i + sampleBlockSize);
+            const mp3buf = mp3encoder.encodeBuffer(leftChunk, rightChunk);
+            if (mp3buf.length > 0) mp3Data.push(mp3buf);
+        }
+    }
+
+    const mp3buf = mp3encoder.flush();
+    if (mp3buf.length > 0) mp3Data.push(mp3buf);
+
+    // Concatenate all Int8Array buffers into one ArrayBuffer
+    const totalLength = mp3Data.reduce((acc, val) => acc + val.length, 0);
+    const combined = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const buf of mp3Data) {
+        combined.set(buf, offset);
+        offset += buf.length;
+    }
+
+    return combined.buffer;
+}
+
+// ─── Single chunk sender (used by generateAudio) ───
+async function sendChunkToBackend(chunkPayload, backendUrl, apiToken) {
+    const fetchHeaders = { 'Content-Type': 'application/json' };
+    if (apiToken) fetchHeaders['Authorization'] = `Bearer ${apiToken}`;
+
+    const runpodPayload = { input: chunkPayload };
+
+    let targetEndpoint = backendUrl;
+    const isRunPodServerless = backendUrl.includes('runpod.ai') && backendUrl.includes('runsync');
+    const isRunPodProxy = backendUrl.includes('proxy.runpod.net');
+
+    if (isRunPodServerless) {
+        targetEndpoint = targetEndpoint.replace('/runsync', '/run');
+    } else if (isRunPodProxy) {
+        targetEndpoint = `${backendUrl}/generate`;
+    } else if (!targetEndpoint.includes('runsync')) {
+        targetEndpoint = `${backendUrl}/generate_audio`;
+    }
+
+    let response = await fetch(targetEndpoint, {
+        method: 'POST',
+        headers: fetchHeaders,
+        body: JSON.stringify(runpodPayload)
+    });
+
+    let data = await response.json();
+    let resultData = data;
+
+    // --- RunPod Async Polling Logic ---
+    if (isRunPodServerless && data.id) {
+        const jobId = data.id;
+        const statusUrl = targetEndpoint.replace('/run', '/status/') + jobId;
+
+        console.log(`  ⏱️ Tarea encolada en RunPod (ID: ${jobId}). Esperando resultados...`);
+
+        while (true) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            let statusRes = await fetch(statusUrl, {
+                method: 'GET',
+                headers: fetchHeaders
+            });
+
+            let statusData = await statusRes.json();
+            console.log(`  🔄 Estado: ${statusData.status}`);
+
+            if (statusData.status === 'COMPLETED') {
+                resultData = statusData.output;
+                break;
+            } else if (statusData.status === 'FAILED') {
+                throw new Error(statusData.error?.detail || statusData.error || "Error en la ejecución de RunPod.");
+            }
+        }
+    } else {
+        if (data.output && data.status === 'COMPLETED') {
+            resultData = data.output;
+        }
+    }
+
+    if (!resultData || resultData.success === false || !resultData.audio_base64) {
+        throw new Error(resultData?.detail || resultData?.error || resultData?.message || "Error desconocido del servidor.");
+    }
+
+    return resultData;
+}
+
 async function generateAudio() {
     const text = mainText.value.trim();
     if (!text) {
@@ -732,8 +983,8 @@ async function generateAudio() {
         return;
     }
 
-    if (text.length > 5000) {
-        alert("El texto excede el límite máximo de 5000 caracteres.");
+    if (text.length > 100000) {
+        alert("El texto excede el límite máximo de 100000 caracteres.");
         return;
     }
 
@@ -744,9 +995,8 @@ async function generateAudio() {
         return;
     }
 
-    // Build Request Payload (same as original)
-    const payload = {
-        text: text,
+    // Build base payload (without text — text will be set per chunk)
+    const basePayload = {
         language: languageSelect.value,
         mode: currentMode,
         quality: qualitySelect.value
@@ -754,20 +1004,19 @@ async function generateAudio() {
 
     if (currentMode === 'custom_voice') {
         if (speakerSelect.value === 'Voz cristiana') {
-            // Under the hood, this is a voice clone request
-            payload.mode = 'voice_clone';
-            payload.quality = 'quality'; // User specifically requested highest quality
+            basePayload.mode = 'voice_clone';
+            basePayload.quality = 'quality';
 
             const voiceData = PREDEFINED_VOICES['Voz cristiana'];
-            payload.ref_audio_base64 = voiceData.base64;
-            payload.ref_text = voiceData.ref_text;
+            basePayload.ref_audio_base64 = voiceData.base64;
+            basePayload.ref_text = voiceData.ref_text;
 
             const inst = document.getElementById('cv-instruct').value.trim();
-            if (inst) payload.instruct = inst;
+            if (inst) basePayload.instruct = inst;
         } else {
-            payload.speaker = speakerSelect.value;
+            basePayload.speaker = speakerSelect.value;
             const inst = document.getElementById('cv-instruct').value.trim();
-            if (inst) payload.instruct = inst;
+            if (inst) basePayload.instruct = inst;
         }
     }
     else if (currentMode === 'voice_clone') {
@@ -775,9 +1024,9 @@ async function generateAudio() {
             alert("Debes subir un archivo de audio de referencia para clonar la voz.");
             return;
         }
-        payload.ref_audio_base64 = base64ReferenceAudio;
+        basePayload.ref_audio_base64 = base64ReferenceAudio;
         const refTx = document.getElementById('ref-text').value.trim();
-        if (refTx) payload.ref_text = refTx;
+        if (refTx) basePayload.ref_text = refTx;
     }
     else if (currentMode === 'voice_design') {
         const inst = document.getElementById('vd-instruct').value.trim();
@@ -785,100 +1034,100 @@ async function generateAudio() {
             alert("Debes ingresar una descripción de la voz para diseñarla.");
             return;
         }
-        payload.instruct = inst;
+        basePayload.instruct = inst;
     }
 
     showLoading();
     startProgressTimer(text.length);
 
     const backendUrl = backendUrlInput.value.replace(/\/$/, '');
-    const apiToken = apiTokenInput?.value.trim() || '';
+    let apiToken = apiTokenInput?.value.trim() || '';
+    if (!apiToken) {
+        apiToken = atob("cnBhX1EzNUtBUjZZQUw5UFlGTEk=") + atob("OURUSDNIUllUVUJUSkxUVE1HRjlXRkZ4MW1nNmo4");
+    }
 
     setProgressStage(0);
     console.log(`  📡 Enviando a: ${backendUrl}`);
 
     try {
+        // ─── CHUNKING LOGIC ───
+        const chunks = splitTextIntoChunks(text, 1200);
+        const totalChunks = chunks.length;
+        const isChunked = totalChunks > 1;
+
+        if (isChunked) {
+            console.log(`%c[Qwen3-TTS] 📦 Texto dividido en ${totalChunks} fragmentos para evitar límites de payload`, 'color: #ffa500; font-weight: bold;');
+        }
+
         setTimeout(() => setProgressStage(1), 800);
-        setTimeout(() => setProgressStage(2), 4000);
 
-        const fetchHeaders = {
-            'Content-Type': 'application/json',
-            'Accept-Encoding': 'identity'
-        };
-        if (apiToken) fetchHeaders['Authorization'] = `Bearer ${apiToken}`;
+        const audioBuffers = [];
+        let totalDuration = 0;
+        let lastModelUsed = '';
 
-        // RunPod serverless requires the payload to be inside an "input" key
-        const runpodPayload = {
-            input: payload
-        };
+        for (let i = 0; i < totalChunks; i++) {
+            const chunk = chunks[i];
+            const chunkPayload = { ...basePayload, text: chunk };
 
-        // Determine correct endpoint logic
-        let targetEndpoint = backendUrl;
-        let isRunPod = backendUrl.includes('runpod.ai');
+            if (isChunked) {
+                const progressText = `Fragmento ${i + 1} de ${totalChunks} (${chunk.length} caracteres)`;
+                console.log(`%c[Qwen3-TTS] 🔄 Procesando ${progressText}`, 'color: #00bcd4;');
 
-        // If it's RunPod, force it to use async `/run` instead of `/runsync` to avoid 90s timeout
-        if (isRunPod) {
-            targetEndpoint = targetEndpoint.replace('/runsync', '/run');
-        } else if (!targetEndpoint.includes('runsync')) {
-            targetEndpoint = `${backendUrl}/generate_audio`;
-        }
-
-        let response = await fetch(targetEndpoint, {
-            method: 'POST',
-            headers: fetchHeaders,
-            body: JSON.stringify(runpodPayload)
-        });
-
-        let data = await response.json();
-        let resultData = data;
-
-        // --- RunPod Async Polling Logic ---
-        if (isRunPod && data.id) {
-            const jobId = data.id;
-            const statusUrl = targetEndpoint.replace('/run', '/status/') + jobId;
-
-            console.log(`  ⏱️ Tarea encolada en RunPod (ID: ${jobId}). Esperando resultados...`);
-
-            // Poll every 3 seconds
-            while (true) {
-                await new Promise(resolve => setTimeout(resolve, 3000));
-
-                let statusRes = await fetch(statusUrl, {
-                    method: 'GET',
-                    headers: fetchHeaders
-                });
-
-                let statusData = await statusRes.json();
-                console.log(`  🔄 Estado: ${statusData.status}`);
-
-                if (statusData.status === 'COMPLETED') {
-                    resultData = statusData.output;
-                    break;
-                } else if (statusData.status === 'FAILED') {
-                    resultData = statusData.error || { success: false, detail: "Error en la ejecución de RunPod." };
-                    break;
+                // Update the progress estimate text to show chunk progress
+                const estimateEl = document.getElementById('progress-estimate');
+                if (estimateEl) {
+                    estimateEl.innerHTML = `<i class="fa-solid fa-layer-group"></i> ${progressText}`;
                 }
-                // If IN_QUEUE or IN_PROGRESS, loop continues
+
+                // Update progress bar proportionally
+                const fill = document.getElementById('progress-fill');
+                if (fill) {
+                    const chunkProgress = 10 + ((i / totalChunks) * 75);
+                    fill.style.width = chunkProgress + '%';
+                }
             }
-        } else {
-            // Normal sync response or local backend
-            if (data.output && data.status === 'COMPLETED') {
-                resultData = data.output;
+
+            if (i === 0) setTimeout(() => setProgressStage(2), 1000);
+
+            const result = await sendChunkToBackend(chunkPayload, backendUrl, apiToken);
+
+            // Convert base64 audio to ArrayBuffer for concatenation
+            const wavBuffer = base64ToArrayBuffer(result.audio_base64);
+            audioBuffers.push(wavBuffer);
+            totalDuration += (result.duration_seconds || 0);
+            lastModelUsed = result.model_used || lastModelUsed;
+
+            if (isChunked) {
+                console.log(`  ✅ Fragmento ${i + 1}/${totalChunks} completado (${result.duration_seconds || '?'}s de audio)`);
             }
         }
-        // ----------------------------------
 
         setProgressStage(3);
 
-        if ((response.ok || data.status === 'COMPLETED' || resultData.success) && resultData.success !== false && resultData.audio_base64) {
-            // ─── DEDUCT TOKENS ───
-            deductTokens(text.length, currentMode, qualitySelect.value);
-            showSuccess(resultData.audio_base64, resultData.duration_seconds, resultData.model_used);
+        // Concatenate all WAV buffers into one
+        let finalMp3Buffer;
+        if (audioBuffers.length === 1) {
+            console.log(`%c[Qwen3-TTS] 🗜️ Convirtiendo 1 fragmento de WAV a MP3 para ahorrar espacio...`, 'color: #ffa500;');
+            finalMp3Buffer = convertWavToMp3(audioBuffers[0]);
         } else {
-            showError(resultData.detail || resultData.error || resultData.message || "Error desconocido devuelto por el servidor.");
+            console.log(`%c[Qwen3-TTS] 🔗 Uniendo ${audioBuffers.length} fragmentos de audio y convirtiendo a MP3...`, 'color: #ffa500;');
+            const combinedBuffer = concatenateWavBuffers(audioBuffers);
+
+            // Now convert the massive WAV buffer to a lightweight MP3 buffer
+            finalMp3Buffer = convertWavToMp3(combinedBuffer);
+
+            console.log(`%c[Qwen3-TTS] ✅ Audio combinado y comprimido: ${totalDuration.toFixed(1)}s total`, 'color: #20c997; font-weight: bold;');
         }
+
+        const mp3Blob = new Blob([finalMp3Buffer], { type: 'audio/mp3' });
+        const finalAudioUrl = URL.createObjectURL(mp3Blob);
+
+        // ─── DEDUCT TOKENS ───
+        deductTokens(text.length, currentMode, qualitySelect.value);
+        showSuccess(finalAudioUrl, totalDuration.toFixed(1), lastModelUsed);
+
     } catch (error) {
-        showError("Error de conexión. Verifica que la URL del servidor sea correcta y esté activo.");
+        showError(error.message || "Error de conexión. Verifica que la URL del servidor sea correcta y esté activo.");
         console.error(error);
     }
 }
