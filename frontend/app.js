@@ -936,9 +936,9 @@ async function sendChunkToBackend(chunkPayload, backendUrl, apiToken) {
     if (isRunPodServerless) {
         targetEndpoint = targetEndpoint.replace('/runsync', '/run');
     } else if (isRunPodProxy) {
-        targetEndpoint = `${backendUrl}/generate`;
+        targetEndpoint = `${backendUrl}/generate?t=${Date.now()}`;
     } else if (!targetEndpoint.includes('runsync')) {
-        targetEndpoint = `${backendUrl}/generate_audio`;
+        targetEndpoint = `${backendUrl}/generate_audio?t=${Date.now()}`;
     }
 
     let response = await fetch(targetEndpoint, {
